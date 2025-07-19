@@ -33,6 +33,8 @@ jobs:
                 "\(.os)/\(.architecture)\(if .variant then "/"+.variant else "" end)"
               end' | \
             sort | uniq > platforms.txt
+
+            awk '/^[a-z0-9_.-]+\/[a-z0-9_.-]+(\/[a-z0-9_.-]+)?$/' platforms.txt > temp.txt && mv temp.txt platforms.txt
             echo "镜像：${image}，支持平台：$(tr '\n' ',' < platforms.txt)"
             
             while IFS= read -r line; do
