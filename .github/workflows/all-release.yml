@@ -33,6 +33,7 @@ jobs:
                 "\(.os)/\(.architecture)\(if .variant then "/"+.variant else "" end)"
               end' | \
             sort | uniq > platforms.txt
+            echo "$镜像：{image}，支持平台如下：${(cat platforms.txt)}"
             
             while IFS= read -r line; do
               docker pull "${image}" --platform "${line}"
@@ -42,6 +43,7 @@ jobs:
               docker save "${image}" -o "${image_name}-${tag_name}.tar"
               gzip -c "${image_name}-${tag_name}.tar" > "${image_name}-${tag_name}.tar.gz"
               rm "${image_name}-${tag_name}.tar"
+              echo "下载打包成功： ${image_name}-${tag_name}.tar.gz"
             done < platforms.txt
           done
 
