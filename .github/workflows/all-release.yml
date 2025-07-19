@@ -19,6 +19,11 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
+    - name: Install JQ
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq
+
     - name: Pull Docker Images and Package
       run: |
         images="${{ github.event.inputs.docker_images }}"
@@ -30,16 +35,31 @@ jobs:
             echo "未找到 $image 的平台信息"
             continue
           fi
+          
+          # 创建临时目录
+          mkdir -p temp-images
+          
+          # 为每个平台创建并保存镜像
           for platform in $(echo $platforms | tr ',' '\n'); do
-            docker buildx imagetools create --platform "$platform" -t "$image-$platform" "$image"
-            docker pull "$image-$platform"
+            platform_name="${platform//\//_}"
             image_name="${image//\//_}"
             image_name="${image_name//:/_}"
-            platform_name="${platform//\//_}"
-            docker save "$image-$platform" -o "${image_name}-${platform_name}.tar"
-            gzip -c "${image_name}-${platform_name}.tar" > "${image_name}-${platform_name}.tar.gz"
-            rm "${image_name}-${platform_name}.tar"
+            
+            # 使用docker pull --platform尝试拉取特定平台的镜像
+            echo "正在拉取 $image 平台: $platform"
+            if docker pull --platform "$platform" "$image"; then
+              # 保存镜像
+              docker save "$image" -o "temp-images/${image_name}-${platform_name}.tar"
+              gzip -c "temp-images/${image_name}-${platform_name}.tar" > "${image_name}-${platform_name}.tar.gz"
+              rm "temp-images/${image_name}-${platform_name}.tar"
+              echo "已保存 $image 平台: $platform"
+            else
+              echo "拉取 $image 平台: $platform 失败"
+            fi
           done
+          
+          # 清理临时目录
+          rm -rf temp-images
         done
 
     - name: Upload artifact
