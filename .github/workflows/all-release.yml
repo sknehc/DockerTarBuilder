@@ -1,41 +1,43 @@
-name: Multi-Platform Pull and Save Docker Image
+name: All-Platform Pull and Save Docker Image
 
 on:
   workflow_dispatch:
     inputs:
-      docker_images:
+      images:
         description: '请填写docker镜像名称 多个用英文逗号分开'
         required: true
         default: 'alpine:latest,busybox:stable-glibc'  # 设置默认的 Docker 镜像列表
-
 jobs:
-  inspect_platforms:
-    runs-on: ubuntu-22.04
+  process_images:
+    runs-on: ubuntu-latest
     steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: 设置Docker环境
+        uses: docker/setup-buildx-action@v3:ml-citation{ref="2,4" data="citationList"}
 
-      - name: Inspect image manifest
+      - name: 处理每个镜像
         run: |
-          images="${{ github.event.inputs.docker_images }}"
-          docker buildx imagetools inspect $images --raw | \
-          jq -r '
-            if .manifests then
-              .manifests[].platform | 
-              "\(.os)/\(.architecture)\(if .variant then "/"+.variant else "" end)"
-            else
-              "\(.os)/\(.architecture)\(if .variant then "/"+.variant else "" end)"
-            end' | \
-          sort | uniq > platforms.txt
-          echo "SUPPORTED_PLATFORMS=$(paste -sd, platforms.txt)" >> $GITHUB_ENV
+          mkdir -p ./images
+          IFS=',' read -ra IMAGES <<< "${{ inputs.images }}"
+          for IMAGE in "${IMAGES][@}"; do
+            echo "处理 $IMAGE"
+            
+            # 获取支持的平台
+            PLATFORMS=$(docker buildx imagetools inspect $IMAGE --raw | \
+              jq -r 'if .manifests then .manifests[].platform | "\(.os)/\(.architecture)" else "linux/amd64" end' | \
+              sort | uniq | paste -sd, -):ml-citation{ref="2" data="citationList"}
+            
+            # 下载多平台镜像
+            docker pull --platform $PLATFORMS $IMAGE:ml-citation{ref="3" data="citationList"}
+            
+            # 保存为tar包
+            TAR_NAME=$(echo $IMAGE | sed 's/[\/:]/-/g').tar
+            docker save -o ./images/$TAR_NAME $IMAGE:ml-citation{ref="2" data="citationList"}
+            gzip -c ./images/$TAR_NAME > ./images/$TAR_NAM.gz
+          done
 
-      - name: Print results
-        run: |
-          if [ -s platforms.txt ]; then
-            echo "✅ 多平台镜像支持:"
-            cat platforms.txt
-          else
-            echo "❌ 非多平台镜像"
-          fi
-        env:
-          image: your-image:tag  # 替换为目标镜像名
+      - name: 创建Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./images/*.gz
+          tag_name: public-images-${{ github.run_id }}
+          generate_release_notes: true:ml-citation{ref="2" data="citationList"}
