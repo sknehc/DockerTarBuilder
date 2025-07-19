@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       images:
-        description: '镜像列表(逗号分隔)'
+        description: 'gdy666/lucky:latest'
         required: true
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
         run: |
           mkdir -p ./images
           IFS=',' read -ra IMAGES <<< "${{ inputs.images }}"
-          for IMAGE in "${IMAGES][@}"; do
+          for IMAGE in "${IMAGES][@]}"; do
             echo "处理 $IMAGE"
             
             # 获取支持的平台
