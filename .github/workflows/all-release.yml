@@ -38,7 +38,7 @@ jobs:
           echo "找到 $image 的平台信息：$platforms"
           # 创建临时目录
           mkdir -p temp-images
-          
+          echo "当前目录$pwd，空间${{ github.workspace }}"
           # 为每个平台创建并保存镜像
           for platform in $(echo $platforms | tr ',' '\n'); do
             platform_name="${platform//\//_}"
