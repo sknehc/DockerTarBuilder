@@ -1,4 +1,4 @@
-name: All-Platform Pull and Save Docker Image
+name: Multi-Platform Pull and Save Docker Image
 
 on:
   workflow_dispatch:
@@ -28,32 +28,116 @@ jobs:
       run: |
         images="${{ github.event.inputs.docker_images }}"
         IFS=',' read -r -a image_array <<< "$images"
+        echo "即将处理所有镜像: $image"
         for image in "${image_array[@]}"; do
-          # 获取镜像支持的所有平台
-          platforms=$(docker buildx imagetools inspect "$image" --raw | jq -r '.manifests[].platform | "\(.os)/\(.architecture)/\(.variant // empty)"' | tr '\n' ',' | sed 's/,$//')
-          if [ -z "$platforms" ]; then
-            echo "未找到 $image 的平台信息"
-            continue
+          echo "处理镜像: $image"
+          
+          # 解析镜像名称和标签
+          image_without_tag="${image%:*}"
+          tag="${image#*:}"
+          if [ "$tag" = "$image_without_tag" ]; then
+            tag="latest"  # 如果没有指定标签，默认为latest
           fi
-          echo "找到 $image 的平台信息：$platforms"
-
-          for platform in $(echo $platforms | tr ',' '\n'); do
-            platform_name="${platform//\//_}"
+          
+          repo="${image_without_tag#*/}"
+          namespace="${image_without_tag%/*}"
+          if [ "$namespace" = "$repo" ]; then
+            namespace="library"  # 如果没有指定命名空间，默认为library
+          fi
+          
+          echo "镜像命名空间: $namespace"
+          echo "镜像仓库: $repo"
+          echo "镜像标签: $tag"
+          
+          # 获取镜像的 manifest
+          echo "尝试获取镜像 manifest (匿名方式)"
+          manifest=$(curl -s -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+            "https://registry.hub.docker.com/v2/$namespace/$repo/manifests/$tag")
+          
+          # 检查是否获取成功
+          if echo "$manifest" | jq -e . >/dev/null 2>&1; then
+            # 检查是否是多平台 manifest
+            media_type=$(echo "$manifest" | jq -r '.mediaType')
+            
+            if [ "$media_type" = "application/vnd.docker.distribution.manifest.list.v2+json" ]; then
+              # 多平台 manifest
+              echo "发现多平台镜像"
+              platforms=$(echo "$manifest" | jq -r '.manifests[].platform | "\(.os)/\(.architecture)/\(.variant // empty)"')
+              
+              if [ -n "$platforms" ]; then
+                platforms=$(echo "$platforms" | tr '\n' ',' | sed 's/,$//')
+                echo "支持的平台: $platforms"
+                
+                # 为每个平台创建并保存镜像
+                for platform in $(echo $platforms | tr ',' '\n'); do
+                  platform_name="${platform//\//_}"
+                  image_name="${image//\//_}"
+                  image_name="${image_name//:/_}"
+                  
+                  echo "正在拉取 $image 平台: $platform"
+                  if docker pull --platform "$platform" "$image"; then
+                    # 获取实际拉取的镜像ID，用于验证
+                    image_id=$(docker images -q "$image")
+                    echo "成功拉取镜像 ID: $image_id"
+                    
+                    # 保存镜像
+                    docker save "$image" -o "${image_name}-${platform_name}.tar"
+                    gzip -c "${image_name}-${platform_name}.tar" > "${image_name}-${platform_name}.tar.gz"
+                    rm "${image_name}-${platform_name}.tar"
+                    echo "已保存 $image 平台: $platform"
+                  else
+                    echo "拉取 $image 平台: $platform 失败"
+                  fi
+                done
+              else
+                echo "无法从 manifest 中提取平台信息"
+              fi
+            else
+              # 单平台镜像
+              echo "处理单平台镜像"
+              image_name="${image//\//_}"
+              image_name="${image_name//:/_}"
+              
+              if docker pull "$image"; then
+                # 获取镜像的平台信息
+                platform=$(docker inspect --format='{{.Os}}/{{.Architecture}}/{{with .Variant}}{{.}}{{end}}' "$image")
+                platform_name="${platform//\//_}"
+                
+                docker save "$image" -o "${image_name}-${platform_name}.tar"
+                gzip -c "${image_name}-${platform_name}.tar" > "${image_name}-${platform_name}.tar.gz"
+                rm "${image_name}-${platform_name}.tar"
+                echo "已保存单平台镜像 $image，平台: $platform"
+              else
+                echo "拉取单平台镜像 $image 失败"
+              fi
+            fi
+          else
+            echo "获取镜像 manifest 失败，可能是由于速率限制或镜像不存在"
+            echo "尝试直接拉取镜像..."
+            
+            # 尝试直接拉取镜像（可能是单平台）
             image_name="${image//\//_}"
             image_name="${image_name//:/_}"
             
-            # 使用docker pull --platform尝试拉取特定平台的镜像
-            echo "正在拉取 $image 平台: $platform"
-            if docker pull --platform "$platform" "$image"; then
-              # 保存镜像
+            if docker pull "$image"; then
+              # 获取镜像的平台信息
+              platform=$(docker inspect --format='{{.Os}}/{{.Architecture}}/{{with .Variant}}{{.}}{{end}}' "$image")
+              platform_name="${platform//\//_}"
+              
               docker save "$image" -o "${image_name}-${platform_name}.tar"
               gzip -c "${image_name}-${platform_name}.tar" > "${image_name}-${platform_name}.tar.gz"
               rm "${image_name}-${platform_name}.tar"
-              echo "已下载 $image 平台: $platform"
+              echo "已保存单平台镜像 $image，平台: $platform"
             else
-              echo "下载 $image 平台: $platform 失败"
+              echo "拉取镜像 $image 失败"
             fi
-          done
+          fi
+          
+          # 清理临时目录
+          rm -rf temp-images
+          
+          echo "镜像 $image 处理完成"
+          echo "-------------------------"
         done
 
     - name: Upload artifact
