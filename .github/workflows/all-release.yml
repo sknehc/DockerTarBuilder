@@ -9,179 +9,33 @@ on:
         default: 'alpine:latest,busybox:stable-glibc'  # 设置默认的 Docker 镜像列表
 
 jobs:
-  pull_and_package:
+  inspect_platforms:
     runs-on: ubuntu-22.04
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-
-    - name: Install JQ
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y jq
-
-    - name: Pull Docker Images and Package
-      run: |
-        images="${{ github.event.inputs.docker_images }}"
-        IFS=',' read -r -a image_array <<< "$images"
-        
-        # 创建用于存储所有镜像tar.gz文件的目录
-        mkdir -p release-assets
-        
-        for image in "${image_array[@]}"; do
-          echo "处理镜像: $image"
-          
-          # 解析镜像名称和标签
-          image_without_tag="${image%:*}"
-          tag="${image#*:}"
-          if [ "$tag" = "$image_without_tag" ]; then
-            tag="latest"  # 如果没有指定标签，默认为latest
-          fi
-          
-          repo="${image_without_tag#*/}"
-          namespace="${image_without_tag%/*}"
-          if [ "$namespace" = "$repo" ]; then
-            namespace="library"  # 如果没有指定命名空间，默认为library
-          fi
-          
-          echo "镜像命名空间: $namespace"
-          echo "镜像仓库: $repo"
-          echo "镜像标签: $tag"
-          
-          # 创建临时目录
-          mkdir -p temp-images
-          
-          # 获取镜像的 digest (用于验证)
-          digest=$(curl -s -I -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            "https://registry.hub.docker.com/v2/$namespace/$repo/manifests/$tag" | \
-            grep -i "Docker-Content-Digest" | awk '{print $2}' | tr -d '\r')
-          
-          echo "镜像 digest: $digest"
-          
-          # 获取镜像的 manifest
-          echo "尝试获取镜像 manifest (匿名方式)"
-          manifest=$(curl -s -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
-            "https://registry.hub.docker.com/v2/$namespace/$repo/manifests/$tag")
-          
-          # 检查是否获取成功
-          if echo "$manifest" | jq -e . >/dev/null 2>&1; then
-            # 检查是否是多平台 manifest
-            media_type=$(echo "$manifest" | jq -r '.mediaType')
-            
-            if [ "$media_type" = "application/vnd.docker.distribution.manifest.list.v2+json" ]; then
-              # 多平台 manifest
-              echo "发现多平台镜像"
-              platforms=$(echo "$manifest" | jq -r '.manifests[].platform | "\(.os)/\(.architecture)/\(.variant // empty)"')
-              
-              if [ -n "$platforms" ]; then
-                platforms=$(echo "$platforms" | tr '\n' ',' | sed 's/,$//')
-                echo "支持的平台: $platforms"
-                
-                # 为每个平台创建并保存镜像
-                for platform in $(echo $platforms | tr ',' '\n'); do
-                  platform_name="${platform//\//_}"
-                  image_name="${image//\//_}"
-                  image_name="${image_name//:/_}"
-                  
-                  echo "正在拉取 $image 平台: $platform"
-                  if docker pull --platform "$platform" "$image"; then
-                    # 获取实际拉取的镜像ID，用于验证
-                    image_id=$(docker images -q "$image")
-                    echo "成功拉取镜像 ID: $image_id"
-                    
-                    # 保存镜像
-                    docker save "$image" -o "temp-images/${image_name}-${platform_name}.tar"
-                    gzip -c "temp-images/${image_name}-${platform_name}.tar" > "release-assets/${image_name}-${platform_name}.tar.gz"
-                    rm "temp-images/${image_name}-${platform_name}.tar"
-                    echo "已保存 $image 平台: $platform"
-                  else
-                    echo "拉取 $image 平台: $platform 失败"
-                  fi
-                done
-              else
-                echo "无法从 manifest 中提取平台信息"
-              fi
+      - name: Inspect image manifest
+        run: |
+          images="${{ github.event.inputs.docker_images }}"
+          docker buildx imagetools inspect $images --raw | \
+          jq -r '
+            if .manifests then
+              .manifests[].platform | 
+              "\(.os)/\(.architecture)\(if .variant then "/"+.variant else "" end)"
             else
-              # 单平台镜像
-              echo "处理单平台镜像"
-              image_name="${image//\//_}"
-              image_name="${image_name//:/_}"
-              
-              if docker pull "$image"; then
-                # 获取镜像的平台信息
-                platform=$(docker inspect --format='{{.Os}}/{{.Architecture}}/{{with .Variant}}{{.}}{{end}}' "$image")
-                platform_name="${platform//\//_}"
-                
-                docker save "$image" -o "temp-images/${image_name}-${platform_name}.tar"
-                gzip -c "temp-images/${image_name}-${platform_name}.tar" > "release-assets/${image_name}-${platform_name}.tar.gz"
-                rm "temp-images/${image_name}-${platform_name}.tar"
-                echo "已保存单平台镜像 $image，平台: $platform"
-              else
-                echo "拉取单平台镜像 $image 失败"
-              fi
-            fi
+              "\(.os)/\(.architecture)\(if .variant then "/"+.variant else "" end)"
+            end' | \
+          sort | uniq > platforms.txt
+          echo "SUPPORTED_PLATFORMS=$(paste -sd, platforms.txt)" >> $GITHUB_ENV
+
+      - name: Print results
+        run: |
+          if [ -s platforms.txt ]; then
+            echo "✅ 多平台镜像支持:"
+            cat platforms.txt
           else
-            echo "获取镜像 manifest 失败，可能是由于速率限制或镜像不存在"
-            echo "尝试直接拉取镜像..."
-            
-            # 尝试直接拉取镜像（可能是单平台）
-            image_name="${image//\//_}"
-            image_name="${image_name//:/_}"
-            
-            if docker pull "$image"; then
-              # 获取镜像的平台信息
-              platform=$(docker inspect --format='{{.Os}}/{{.Architecture}}/{{with .Variant}}{{.}}{{end}}' "$image")
-              platform_name="${platform//\//_}"
-              
-              docker save "$image" -o "temp-images/${image_name}-${platform_name}.tar"
-              gzip -c "temp-images/${image_name}-${platform_name}.tar" > "release-assets/${image_name}-${platform_name}.tar.gz"
-              rm "temp-images/${image_name}-${platform_name}.tar"
-              echo "已保存单平台镜像 $image，平台: $platform"
-            else
-              echo "拉取镜像 $image 失败"
-            fi
+            echo "❌ 非多平台镜像"
           fi
-          
-          # 清理临时目录
-          rm -rf temp-images
-          
-          echo "镜像 $image 处理完成"
-          echo "-------------------------"
-        done
-        
-        # 检查是否有镜像文件需要发布
-        if [ -n "$(ls -A release-assets 2>/dev/null)" ]; then
-          echo "准备发布的镜像文件:"
-          ls -lh release-assets
-          echo "RELEASE_ASSETS=release-assets/*" >> $GITHUB_ENV
-        else
-          echo "没有找到要发布的镜像文件"
-          echo "RELEASE_ASSETS=" >> $GITHUB_ENV
-        fi
-
-    - name: Create GitHub Release
-      if: env.RELEASE_ASSETS != ''
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: docker-images-${{ github.run_number }}
-        release_name: Docker Images Release ${{ github.run_number }}
-        draft: false
-        prerelease: false
-
-    - name: Upload Release Assets
-      if: env.RELEASE_ASSETS != ''
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ${{ env.RELEASE_ASSETS }}
-        asset_name: ${{ env.RELEASE_ASSETS }}
-        asset_content_type: application/gzip
+        env:
+          image: your-image:tag  # 替换为目标镜像名
