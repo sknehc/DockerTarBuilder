@@ -1,4 +1,4 @@
-name: Multi-Platform Pull and Save Docker Image
+name: All-Platform Pull and Save Docker Image
 
 on:
   workflow_dispatch:
