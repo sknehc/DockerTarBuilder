@@ -36,10 +36,7 @@ jobs:
             continue
           fi
           echo "找到 $image 的平台信息：$platforms"
-          # 创建临时目录
-          mkdir -p temp-images
-          echo "当前目录$pwd，空间${{ github.workspace }}"
-          # 为每个平台创建并保存镜像
+
           for platform in $(echo $platforms | tr ',' '\n'); do
             platform_name="${platform//\//_}"
             image_name="${image//\//_}"
@@ -49,12 +46,12 @@ jobs:
             echo "正在拉取 $image 平台: $platform"
             if docker pull --platform "$platform" "$image"; then
               # 保存镜像
-              docker save "$image" -o "temp-images/${image_name}-${platform_name}.tar"
-              gzip -c "temp-images/${image_name}-${platform_name}.tar" > "${image_name}-${platform_name}.tar.gz"
-              rm "temp-images/${image_name}-${platform_name}.tar"
-              echo "已保存 $image 平台: $platform"
+              docker save "$image" -o "${image_name}-${platform_name}.tar"
+              gzip -c "${image_name}-${platform_name}.tar" > "${image_name}-${platform_name}.tar.gz"
+              rm "${image_name}-${platform_name}.tar"
+              echo "已下载 $image 平台: $platform"
             else
-              echo "拉取 $image 平台: $platform 失败"
+              echo "下载 $image 平台: $platform 失败"
             fi
           done
         done
@@ -63,5 +60,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: my-artifact
-        path: ${{ github.workspace }}/temp-images/*.tar.gz
+        path: ${{ github.workspace }}/*.tar.gz
         retention-days: 1  # 将保留天数设置为 1 天 最多可设置90天
