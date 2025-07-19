@@ -35,6 +35,8 @@ jobs:
             sort | uniq > platforms.txt
 
             awk '/^[a-z0-9_.-]+\/[a-z0-9_.-]+(\/[a-z0-9_.-]+)?$/' platforms.txt > temp.txt && mv temp.txt platforms.txt
+            grep -E '^(linux|windows|darwin)/(amd64|arm64|arm/v7|ppc64le|s390x)(/[a-z0-9_-]+)?$' platforms.txt > temp.txt && rm platforms.txt && mv temp.txt platforms.txt
+
             echo "镜像：${image}，支持平台：$(tr '\n' ',' < platforms.txt)"
             
             while IFS= read -r line; do
