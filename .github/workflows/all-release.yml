@@ -67,7 +67,7 @@ jobs:
               docker save "${image}" -o "${image_name}-${plat}.tar"
               gzip -c "${image_name}-${plat}.tar" > "${image_name}-${plat}.tar.gz"
               rm "${image_name}-${plat}.tar"
-              echo "下载打包成功： ${image_name}-${tag_name}.tar.gz"
+              echo "下载打包成功： ${image_name}-${plat}.tar.gz"
             done < platforms.txt
           done
 
