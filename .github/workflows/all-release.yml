@@ -23,18 +23,19 @@ jobs:
           IFS=',' read -r -a arr <<< "${{ github.event.inputs.docker_images }}"
 
           image_array=()
+          curdate=$(date +'%Y%m%d')
           for image in "${arr[@]}"; do
             if [[ $image == *":"* ]]; then			
               IFS=':' read -r name tag <<< "$image"			  
               if [[ "$tag" == "latest" ]]; then			  
                 echo "${name}，使用截至${curdate}的latest版本"
-                image_array+=("${name}:latest-${curdate}")
+                image_array+=("${name}:latest")
               else
                 image_array+=("$image")
               fi
             else
               echo "${image}未提供版本号，默认使用截至${curdate}的latest版本"
-              image_array+=("$image:latest-${curdate}")
+              image_array+=("${image}:latest")
             fi
           done
 
@@ -55,13 +56,16 @@ jobs:
 
             echo "镜像：${image}，支持平台：$(tr '\n' ' ' < platforms.txt)"
             
-            while IFS= read -r line; do
-              docker pull "${image}" --platform "${line}"
+            while IFS= read -r platmp; do
+              docker pull "${image}" --platform "${platmp}"
+
+              plat="${plat//\//_}"
               image_name="${image//\//_}"
               image_name="${image_name//:/_}"
-              tag_name="${line//\//_}"
-              docker save "${image}" -o "${image_name}-${tag_name}.tar"
-              gzip -c "${image_name}-${tag_name}.tar" > "${image_name}-${tag_name}.tar.gz"
+              image_name="${image_name//latest/lastest${curdate}}"
+              
+              docker save "${image}" -o "${image_name}-${plat}.tar"
+              gzip -c "${image_name}-${plat}.tar" > "${image_name}-${plat}.tar.gz"
               rm "${image_name}-${tag_name}.tar"
               echo "下载打包成功： ${image_name}-${tag_name}.tar.gz"
             done < platforms.txt
