@@ -59,7 +59,7 @@ jobs:
             while IFS= read -r platmp; do
               docker pull "${image}" --platform "${platmp}"
 
-              plat="${plat//\//_}"
+              plat="${platmp//\//_}"
               image_name="${image//\//_}"
               image_name="${image_name//:/_}"
               image_name="${image_name//latest/lastest${curdate}}"
