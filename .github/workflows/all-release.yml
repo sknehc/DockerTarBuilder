@@ -20,8 +20,24 @@ jobs:
 
       - name: Inspect image manifest
         run: |
-          images="${{ github.event.inputs.docker_images }}"
-          IFS=',' read -r -a image_array <<< "$images"
+          IFS=',' read -r -a arr <<< "${{ github.event.inputs.docker_images }}"
+
+          local image_array=()
+          for image in "${arr[@]}"; do
+            if [[ $image == *":"* ]]; then			
+              IFS=':' read -r name tag <<< "$image"			  
+              if [[ "$tag" == "latest" ]]; then			  
+                echo "${name}，使用截至${curdate}的latest版本"
+                image_array+=("${name}:latest-${curdate}")
+              else
+                image_array+=("$image")
+              fi
+            else
+              echo "${image}未提供版本号，默认使用截至${curdate}的latest版本"
+              image_array+=("$image:latest-${curdate}")
+            fi
+          done
+
           for image in "${image_array[@]}"; do
             > platforms.txt
             docker buildx imagetools inspect ${image} --raw | \
@@ -37,7 +53,7 @@ jobs:
             awk '/^[a-z0-9_.-]+\/[a-z0-9_.-]+(\/[a-z0-9_.-]+)?$/' platforms.txt > temp.txt && mv temp.txt platforms.txt
             grep -E '^(linux|windows|darwin)/(amd64|arm64|arm/v7|ppc64le|s390x)(/[a-z0-9_-]+)?$' platforms.txt > temp.txt && rm platforms.txt && mv temp.txt platforms.txt
 
-            echo "镜像：${image}，支持平台：$(tr '\n' ',' < platforms.txt)"
+            echo "镜像：${image}，支持平台：$(tr '\n' ' ' < platforms.txt)"
             
             while IFS= read -r line; do
               docker pull "${image}" --platform "${line}"
@@ -64,11 +80,8 @@ jobs:
           tag_name: DockerTarBuilder-All-Platfrom
           name: ${{ env.RELEASE_NAME }} for All-Platfrom
           body: |
-            [![Github](https://img.shields.io/badge/RELEASE:DockerTarBuilder-123456?logo=github&logoColor=fff&labelColor=green&style=for-the-badge)](https://www.bilibili.com/video/BV1EZ421M7mL) [![Github](https://img.shields.io/badge/国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge)](https://wkdaily.cpolar.top/archives/1)
             ### How to use? For example
             `docker load -i alpine_latest.tar.gz `
-            ### Video teaching
-            [![Bilibili](https://img.shields.io/badge/Bilibili-123456?logo=bilibili&logoColor=fff&labelColor=fb7299)](https://www.bilibili.com/video/BV1yyq6YREdF)
           draft: false
           prerelease: false
         env:
