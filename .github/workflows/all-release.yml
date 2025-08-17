@@ -22,7 +22,7 @@ jobs:
         run: |
           IFS=',' read -r -a arr <<< "${{ github.event.inputs.docker_images }}"
 
-          local image_array=()
+          image_array=()
           for image in "${arr[@]}"; do
             if [[ $image == *":"* ]]; then			
               IFS=':' read -r name tag <<< "$image"			  
